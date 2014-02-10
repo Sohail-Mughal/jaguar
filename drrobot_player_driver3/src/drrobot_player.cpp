@@ -1,6 +1,6 @@
 /*!
- *  drrobot_player
- *  Copyright (c) 2013, Dr Robot Inc
+ *  drrobot_player_driver3
+ *  Copyright (c) 2011, Dr Robot Inc
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -31,28 +31,32 @@
 /*!
 
 @mainpage
-  drrobot_player is a driver for motion control system on Jaguar series mobile robot, available from
+  drrobot_player_driver3 is a driver for motion control system on I90/Sentinel3/Hawk/H20/X80SV/Jaguar series mobile robot, available from
 <a href="http://www.drrobot.com">Dr Robot </a>.
 <hr>
 
 @section usage Usage
 @par     After start roscore, you need load robot configuration file to parameter server first.
-          For example, Jaguar robot, you need load drrobotplayer_jaguar.yaml use command "rosparam load drrobotplayer_jaguar.yaml"
+          For example, I90 robot, you need load drrobotplayer_I90.yaml use command "rosparam load drrobotplayer_I90.yaml"
 @verbatim
-$ drrobot_player
+$ drrobot_player_driver3
 @endverbatim
 
 <hr>
 @section topic ROS topics
 
 Subscribes to (name/type):
-- @b "motor_cmd_sub"/std_msgs::string : motor commands to drive the robot.
+- @b "cmd_vel"/Twist : velocity commands to differentially drive the robot.
+- @b will develop other command subscribles in future, such as servo control.
 
 Publishes to (name / type):
--@b drrobot_motor/MotorDataArray: will publish MotorDataArray Message. Please referee the message file.
--@b drrobot_motorboard/MotorDriverBoardArray: will publish MotorBoardArray Message. Please referee the message file.
--@b drrobot_gps/GPSInfo: will publish GPS Message
--@b drrobot_imu/IMUData: will publish IMU Message
+-@b drrobot_motor: will publish MotionInfoArray Message. Please referee the message file.
+-@b drrobot_powerinfo: will publish PowerInfo Message. Please referee the message file.
+-@b drrobot_ir: will publish RangeArray Message for IR sensor, and transform AD value from DrRobotMotionSensorDriver to distance value in unit meter. Please referee the message file.
+-@b drrobot_sonar: will publish RangeArray Message for ultrasonic sensor, and transform value from DrRobotMotionSensorDriver to distance value in unit meter. Please referee the message file.
+-@b drrobot_standardsensor: will publish StandardardSensor Message. Please referee the message file.
+-@b drrobot_customsensor: will publish CustomSensor Message. Please referee the message file. Not available for standard I90/Sentinel3/Hawk/H20/X80SV robot
+
 <hr>
 
 @section parameters ROS parameters, please read yaml file
@@ -69,6 +73,8 @@ Publishes to (name / type):
 - @b EncoderCircleCnt (int) : one circle encoder count
 - @b MinSpeed (double) : minimum speed, unit is m/s.
 - @b MaxSpeed (double) : maximum speed, unit is m/s.
+- @b enable_ir (bool)  : Whether to enable sonar range sensors. Default: true.
+- @b enable_sonar (bool)  : Whether to enable IR range sensors. Default: true.
  */
 
 #include <assert.h>
@@ -82,19 +88,20 @@ Publishes to (name / type):
 #include <nav_msgs/Odometry.h>
 #include <geometry_msgs/Twist.h>
 #include <std_msgs/Float64.h>
-#include <std_msgs/String.h>
-#include <sstream>
-#include <drrobot_player_driver3/MotorData.h>
-#include <drrobot_player_driver3/MotorDataArray.h>
-#include <drrobot_player_driver3/MotorBoardInfoArray.h>
-#include <drrobot_player_driver3/MotorBoardInfo.h>
-#include <drrobot_player_driver3/GPSInfo.h>
-#include <drrobot_player_driver3/IMUData.h>
+
+#include <drrobot_player_driver3/MotorInfo.h>
+#include <drrobot_player_driver3/MotorInfoArray.h>
+#include <drrobot_player_driver3/RangeArray.h>
+#include <drrobot_player_driver3/Range.h>
+#include <drrobot_player_driver3/PowerInfo.h>
+#include <drrobot_player_driver3/StandardSensor.h>
+#include <drrobot_player_driver3/CustomSensor.h>
 
 #include <DrRobotMotionSensorDriver.hpp>
 
-#define MOTOR_NUM           8       //max
-#define MOTOR_BOARD_NUM     4       //max
+#define MOTOR_NUM       6
+#define IR_NUM          10
+#define US_NUM          6
 using namespace std;
 using namespace DrRobot_MotionSensorDriver;
 
@@ -104,19 +111,23 @@ public:
 
     ros::NodeHandle node_;
 
+    tf::TransformBroadcaster tf_;
 
     ros::Publisher motorInfo_pub_;
-    ros::Publisher motorBoardInfo_pub_;
-    ros::Publisher gps_pub_;
-    ros::Publisher imu_pub_;
-    ros::Subscriber motor_cmd_sub_;	
+    ros::Publisher powerInfo_pub_;
+    ros::Publisher ir_pub_;
+    ros::Publisher sonar_pub_;
+    ros::Publisher standardSensor_pub_;
+    ros::Publisher customSensor_pub_;
+
+    ros::Subscriber cmd_vel_sub_;
     std::string robot_prefix_;
 
     DrRobotPlayerNode()
     {
         ros::NodeHandle private_nh("~");
 
-        robotID_ = "DrRobot";
+        robotID_ = "drobot1";
         private_nh.getParam("RobotID",robotID_);
         ROS_INFO("I get ROBOT_ID: [%s]", robotID_.c_str());
 
@@ -140,6 +151,21 @@ public:
         private_nh.getParam("RobotSerialPort",robotSerialPort_);
         ROS_INFO("I get ROBOT_SerialPort: [%s]", robotSerialPort_.c_str());
 
+        enable_ir_ = true;
+        private_nh.getParam("Enable_IR", enable_ir_);
+        if (enable_ir_)
+          ROS_INFO("I get Enable_IR: true");
+        else
+          ROS_INFO("I get Enable_IR: false");
+
+
+        enable_sonar_ = true;
+        private_nh.getParam("Enable_US", enable_sonar_);
+        if (enable_sonar_)
+          ROS_INFO("I get Enable_US: true");
+        else
+          ROS_INFO("I get Enable_US: false");
+
         motorDir_ = 1;
         private_nh.getParam("MotorDir", motorDir_);
         ROS_INFO("I get MotorDir: [%d]", motorDir_);
@@ -160,45 +186,76 @@ public:
         private_nh.getParam("MaxSpeed", maxSpeed_);
         ROS_INFO("I get Max Speed: [%f]", maxSpeed_);
 
-        encoderOneCircleCnt_ = 380;
+        encoderOneCircleCnt_ = 800;
         private_nh.getParam("EncoderCircleCnt", encoderOneCircleCnt_);
         ROS_INFO("I get Encoder One Circle Count: [%d]", encoderOneCircleCnt_);
 
         if (robotCommMethod_ == "Network")
         {
           robotConfig1_.commMethod = Network;
+          robotConfig2_.commMethod = Network;
         }
         else
         {
           robotConfig1_.commMethod = Serial;
+          robotConfig2_.commMethod = Serial;
         }
 
         if (robotType_ == "Jaguar")
         {
-          robotConfig1_.robotType = Jaguar;
+          robotConfig1_.boardType = Jaguar;
         }
+        else if(robotType_ == "I90")
+        {
+          robotConfig1_.boardType = I90_Power;
+          robotConfig2_.boardType = I90_Motion;
+        }
+        else if (robotType_ == "Sentinel3")
+        {
+          robotConfig1_.boardType = Sentinel3_Power;
+          robotConfig2_.boardType = Sentinel3_Motion;
+        }
+        else if (robotType_ == "Hawk_H20")
+        {
+          robotConfig1_.boardType = Hawk_H20_Power;
+          robotConfig2_.boardType = Hawk_H20_Motion;
+        }
+        else if(robotType_ == "X80SV")
+        {
+          robotConfig1_.boardType = X80SV;
+        }
+
         robotConfig1_.portNum = commPortNum_;
+        robotConfig2_.portNum = commPortNum_ + 1;
 
-
+      //  strcat(robotConfig1_.robotIP,robotIP_.c_str());
 	  strcpy(robotConfig1_.robotIP,robotIP_.c_str());
+      //  strcat(robotConfig2_.robotIP,robotIP_.c_str());
+	  strcpy(robotConfig2_.robotIP,robotIP_.c_str());
 
-
+      //  strcat(robotConfig1_.serialPortName,robotSerialPort_.c_str());
 	  strcpy(robotConfig1_.serialPortName,robotSerialPort_.c_str());
-
+      //  strcat(robotConfig2_.serialPortName,robotSerialPort_.c_str());
+	  strcpy(robotConfig2_.serialPortName,robotSerialPort_.c_str());
         //create publishers for sensor data information
-        motorInfo_pub_ = node_.advertise<drrobot_player_driver3::MotorDataArray>("drrobot_motor", 1);
-        motorBoardInfo_pub_ = node_.advertise<drrobot_player_driver3::MotorBoardInfoArray>("drrobot_motorboard", 1);
-        gps_pub_ = node_.advertise<drrobot_player_driver3::GPSInfo>("drrobot_gps", 1);
-        imu_pub_ = node_.advertise<drrobot_player_driver3::IMUData>("drrobot_imu", 1);
-	
-	drrobotMotionDriver_ = new DrRobotMotionSensorDriver();
+        motorInfo_pub_ = node_.advertise<drrobot_player_driver3::MotorInfoArray>("drrobot_motor", 1);
+        powerInfo_pub_ = node_.advertise<drrobot_player_driver3::PowerInfo>("drrobot_powerinfo", 1);
+        if (enable_ir_) { ir_pub_ = node_.advertise<drrobot_player_driver3::RangeArray>("drrobot_ir", 1); }
+        if (enable_sonar_) { sonar_pub_ = node_.advertise<drrobot_player_driver3::RangeArray>("drrobot_sonar",1); }
+        standardSensor_pub_ = node_.advertise<drrobot_player_driver3::StandardSensor>("drrobot_standardsensor", 1);
+        customSensor_pub_ = node_.advertise<drrobot_player_driver3::CustomSensor>("drrobot_customsensor", 1);
+
+
+        drrobotPowerDriver_ = new DrRobotMotionSensorDriver();
+        drrobotMotionDriver_ = new DrRobotMotionSensorDriver();
         if (  (robotType_ == "Jaguar") )
         {
           drrobotMotionDriver_->setDrRobotMotionDriverConfig(&robotConfig1_);
         }
         else
         {
-
+          drrobotPowerDriver_->setDrRobotMotionDriverConfig(&robotConfig1_);
+          drrobotMotionDriver_->setDrRobotMotionDriverConfig(&robotConfig2_);
         }
         cntNum_ = 0;
     }
@@ -227,150 +284,220 @@ public:
       }
       else
       {
+        drrobotMotionDriver_->openNetwork(robotConfig2_.robotIP,robotConfig2_.portNum);
+        drrobotPowerDriver_->openNetwork(robotConfig1_.robotIP,robotConfig1_.portNum);
 
       }
 
-      motor_cmd_sub_ = node_.subscribe<std_msgs::String>("drrobot_motor_cmd", 1, boost::bind(&DrRobotPlayerNode::cmdReceived, this, _1));
+      cmd_vel_sub_ = node_.subscribe<geometry_msgs::Twist>("drrobot_cmd_vel", 1, boost::bind(&DrRobotPlayerNode::cmdVelReceived, this, _1));
         return(0);
     }
 
     int stop()
     {
         int status = 0;
-        drrobotMotionDriver_->close();
-
+         drrobotMotionDriver_->close();
+        drrobotPowerDriver_->close();
         usleep(1000000);
         return(status);
     }
 
-    void cmdReceived(const std_msgs::String::ConstPtr& cmd_data)
+    void cmdVelReceived(const geometry_msgs::Twist::ConstPtr& cmd_vel)
     {
-      
-        ROS_INFO("Received motor command: [%s]", cmd_data->data.c_str());
-	int nLen = strlen(cmd_data->data.c_str());
-	 ROS_INFO("Received motor command len: [%d]", nLen);
-        drrobotMotionDriver_->sendCommand(cmd_data->data.c_str(),nLen);
-      
+      double g_vel = cmd_vel->linear.x;
+      double t_vel = cmd_vel->angular.z;
+      if (robotConfig1_.boardType != Jaguar)
+      {
+        double leftWheel = (2 * g_vel - t_vel* wheelDis_) / (2 * wheelRadius_);
+        double rightWheel = (t_vel* wheelDis_ + 2 * g_vel) / (2 * wheelRadius_);
+
+        int leftWheelCmd = motorDir_ * leftWheel * encoderOneCircleCnt_ / ( 2* 3.1415927);
+        int rightWheelCmd = - motorDir_ * rightWheel * encoderOneCircleCnt_ / ( 2* 3.1415927);
+        ROS_INFO("Received control command: [%d, %d]", leftWheelCmd,rightWheelCmd);
+        drrobotMotionDriver_->sendMotorCtrlAllCmd(Velocity,leftWheelCmd, rightWheelCmd,NOCONTROL,NOCONTROL, NOCONTROL,NOCONTROL);
+      }
+      else
+      {
+         int forwardPWM = -motorDir_ * g_vel * 16384 + 16384;
+         int turnPWM = -motorDir_ * t_vel * 16384 + 16384;
+         if (forwardPWM > 32767) forwardPWM = 32767;
+         if (forwardPWM < 0) forwardPWM = 0;
+         if (turnPWM > 32767) turnPWM = 32767;
+         if (turnPWM < 0) turnPWM = 0;
+         drrobotMotionDriver_->sendMotorCtrlAllCmd(PWM,NOCONTROL,NOCONTROL,NOCONTROL,forwardPWM,turnPWM, NOCONTROL);
+      }
+
     }
 
     void doUpdate()
     {
-	
-        drrobotMotionDriver_->readMotorSensorData(&motorSensorData_);
-        drrobotMotionDriver_->readMotorBoardData(&motorBoardData_);
-        drrobotMotionDriver_->readIMUSensorData(&imuSensorData_);
-        drrobotMotionDriver_->readGPSSensorData(&gpsSensorData_);
 
+      if ( (robotConfig1_.boardType == I90_Power) || (robotConfig1_.boardType == Sentinel3_Power)
+          || (robotConfig1_.boardType == Hawk_H20_Power) )
+      {
+        if (drrobotPowerDriver_->portOpen())
+        {
+          drrobotPowerDriver_->readPowerSensorData(&powerSensorData_);
+          drrobot_player_driver3::PowerInfo powerInfo;
+          powerInfo.ref_vol = 1.5 * 4095 /(double)powerSensorData_.refVol;
+
+          powerInfo.bat1_vol = (double)powerSensorData_.battery1Vol  * 8 / 4095 * powerInfo.ref_vol;
+          powerInfo.bat2_vol = (double) powerSensorData_.battery2Vol * 8 / 4095 * powerInfo.ref_vol;
+
+          powerInfo.bat1_temp = powerSensorData_.battery1Thermo;
+          powerInfo.bat2_temp = powerSensorData_.battery2Thermo;
+
+          powerInfo.dcin_vol = (double)powerSensorData_.dcINVol * 8 / 4095 * powerInfo.ref_vol;
+          powerInfo.charge_path = powerSensorData_.powerChargePath;
+          powerInfo.power_path = powerSensorData_.powerPath;
+          powerInfo.power_status = powerSensorData_.powerStatus;
+
+          powerInfo_pub_.publish(powerInfo);
+        }
+      }
+      if (drrobotMotionDriver_->portOpen())
+      {
+        drrobotMotionDriver_->readMotorSensorData(&motorSensorData_);
+        drrobotMotionDriver_->readRangeSensorData(&rangeSensorData_);
+        drrobotMotionDriver_->readStandardSensorData(&standardSensorData_);
+
+        drrobotMotionDriver_->readCustomSensorData(&customSensorData_);
               // Translate from driver data to ROS data
             cntNum_++;
-              drrobot_player_driver3::MotorDataArray motorDataArray;
-              motorDataArray.motorData.resize(MOTOR_NUM);
+              drrobot_player_driver3::MotorInfoArray motorInfoArray;
+              motorInfoArray.motorInfos.resize(MOTOR_NUM);
               for (uint32_t i = 0 ; i < MOTOR_NUM; ++i)
               {
-                  motorDataArray.motorData[i].header.stamp = ros::Time::now();
-                  motorDataArray.motorData[i].header.frame_id = string("drrobot_motor_");
-                  motorDataArray.motorData[i].header.frame_id += boost::lexical_cast<std::string>(i);
-
-                  motorDataArray.motorData[i].motorPower = motorSensorData_.motorSensorPWM[i];
-                  motorDataArray.motorData[i].encoderPos = motorSensorData_.motorSensorEncoderPos[i];
-                  motorDataArray.motorData[i].encoderVel = motorSensorData_.motorSensorEncoderVel[i];
-                  motorDataArray.motorData[i].encoderDiff = motorSensorData_.motorSensorEncoderPosDiff[i];
-                  motorDataArray.motorData[i].motorTemp = motorSensorData_.motorSensorTemperature[i];
-                  motorDataArray.motorData[i].motorCurrent = motorSensorData_.motorSensorCurrent[i];
+                  motorInfoArray.motorInfos[i].header.stamp = ros::Time::now();
+                  motorInfoArray.motorInfos[i].header.frame_id = string("drrobot_motor_");
+                  motorInfoArray.motorInfos[i].header.frame_id += boost::lexical_cast<std::string>(i);
+                  motorInfoArray.motorInfos[i].robot_type = robotConfig1_.boardType;
+                  motorInfoArray.motorInfos[i].encoder_pos = motorSensorData_.motorSensorEncoderPos[i];
+                  motorInfoArray.motorInfos[i].encoder_vel = motorSensorData_.motorSensorEncoderVel[i];
+                  motorInfoArray.motorInfos[i].encoder_dir = motorSensorData_.motorSensorEncoderDir[i];
+                  if (robotConfig1_.boardType == Hawk_H20_Motion)
+                  {
+                    motorInfoArray.motorInfos[i].motor_current = (float)motorSensorData_.motorSensorCurrent[i] * 3 /4096;;
+                  }
+                  else if(robotConfig1_.boardType != Jaguar)
+                  {
+                    motorInfoArray.motorInfos[i].motor_current = (float)motorSensorData_.motorSensorCurrent[i] / 728;
+                  }
+                  else
+                  {
+                    motorInfoArray.motorInfos[i].motor_current = 0.0;
+                  }
+                  motorInfoArray.motorInfos[i].motor_pwm = motorSensorData_.motorSensorPWM[i];
               }
 
-             // ROS_INFO("publish motor info array");
-              motorInfo_pub_.publish(motorDataArray);
+              //ROS_INFO("publish motor info array");
+              motorInfo_pub_.publish(motorInfoArray);
 
-              drrobot_player_driver3::MotorBoardInfoArray motorBoardInfoArray;
-              motorBoardInfoArray.motorBoardInfo.resize(MOTOR_BOARD_NUM);
-              for (uint32_t i = 0 ; i < MOTOR_BOARD_NUM; ++i)
+
+              drrobot_player_driver3::RangeArray rangerArray;
+              rangerArray.ranges.resize(US_NUM);
+	      if(enable_sonar_)
+	      {
+		      for (uint32_t i = 0 ; i < US_NUM; ++i)
+		      {
+
+		          rangerArray.ranges[i].header.stamp = ros::Time::now();
+		          rangerArray.ranges[i].header.frame_id = string("drrobot_sonar_");
+		          rangerArray.ranges[i].header.frame_id += boost::lexical_cast<std::string>(i);
+		          rangerArray.ranges[i].range = (float)rangeSensorData_.usRangeSensor[i]/100;     //to meters
+
+		          // around 30 degrees
+		          rangerArray.ranges[i].field_of_view = 0.5236085;
+		          rangerArray.ranges[i].max_range = 2.55;
+		          rangerArray.ranges[i].min_range = 0;
+                  rangerArray.ranges[i].radiation_type = drrobot_player_driver3::Range::ULTRASOUND;
+		      }
+
+		      sonar_pub_.publish(rangerArray);
+		}
+
+
+	      if(enable_ir_)
+	      {
+		      rangerArray.ranges.resize(IR_NUM);
+		      for (uint32_t i = 0 ; i < IR_NUM; ++i)
+		      {
+		          rangerArray.ranges[i].header.stamp = ros::Time::now();
+		          rangerArray.ranges[i].header.frame_id = string("drrobot_ir_");
+		          rangerArray.ranges[i].header.frame_id += boost::lexical_cast<std::string>(i);
+		          rangerArray.ranges[i].range = ad2Dis(rangeSensorData_.irRangeSensor[i]);
+                  rangerArray.ranges[i].radiation_type = drrobot_player_driver3::Range::INFRARED;
+		      }
+
+		      ir_pub_.publish(rangerArray);
+	     }
+
+              drrobot_player_driver3::StandardSensor standardSensor;
+              standardSensor.humanSensorData.resize(4);
+              standardSensor.tiltingSensorData.resize(2);
+              standardSensor.overHeatSensorData.resize(2);
+              standardSensor.header.stamp = ros::Time::now();
+              standardSensor.header.frame_id = string("drrobot_standardsensor");
+              for (uint32_t i = 0; i < 4; i++)
+                standardSensor.humanSensorData[i] = standardSensorData_.humanSensorData[i];
+              for (uint32_t i = 0; i < 2; i++)
+                standardSensor.tiltingSensorData[i] = standardSensorData_.tiltingSensorData[i];
+              for (uint32_t i = 0; i < 2; i++)
+                standardSensor.overHeatSensorData[i] = standardSensorData_.overHeatSensorData[i];
+
+              standardSensor.thermoSensorData = standardSensorData_.thermoSensorData;
+
+              standardSensor.boardPowerVol = (double)standardSensorData_.boardPowerVol * 9 /4095;
+              standardSensor.servoPowerVol = (double)standardSensorData_.servoPowerVol * 9 /4095;
+
+              if (robotConfig1_.boardType != Jaguar)
               {
-                  motorBoardInfoArray.motorBoardInfo[i].header.stamp = ros::Time::now();
-                  motorBoardInfoArray.motorBoardInfo[i].header.frame_id = string("drrobot_motor_");
-                  motorBoardInfoArray.motorBoardInfo[i].header.frame_id += boost::lexical_cast<std::string>(i);
-
-                  motorBoardInfoArray.motorBoardInfo[i].status = motorBoardData_.status[i];
-                  motorBoardInfoArray.motorBoardInfo[i].temp1 = motorBoardData_.temp1[i];
-                  motorBoardInfoArray.motorBoardInfo[i].temp2 = motorBoardData_.temp2[i];
-                  motorBoardInfoArray.motorBoardInfo[i].temp3 = motorBoardData_.temp3[i];
-
-                  motorBoardInfoArray.motorBoardInfo[i].volMain = motorBoardData_.volMain[i];
-                  motorBoardInfoArray.motorBoardInfo[i].vol12V = motorBoardData_.vol12V[i];
-                  motorBoardInfoArray.motorBoardInfo[i].vol5V = motorBoardData_.vol5V[i];
-                  motorBoardInfoArray.motorBoardInfo[i].dinput = motorBoardData_.dinput[i];
-                  motorBoardInfoArray.motorBoardInfo[i].doutput = motorBoardData_.doutput[i];
-                  motorBoardInfoArray.motorBoardInfo[i].ack = motorBoardData_.ack[i];
+                standardSensor.motorPowerVol = (double)standardSensorData_.motorPowerVol * 24 /4095;
               }
+              else
+              {
+                standardSensor.motorPowerVol = (double)standardSensorData_.motorPowerVol * 34.498 /4095;
+              }
+              standardSensor.refVol = (double)standardSensorData_.refVol / 4095 * 6;
+              standardSensor.potVol = (double)standardSensorData_.potVol / 4095 * 6;
+              standardSensor_pub_.publish(standardSensor);
 
-              //ROS_INFO("publish motor driver board info array");
-              motorBoardInfo_pub_.publish(motorBoardInfoArray);
+              drrobot_player_driver3::CustomSensor customSensor;
+              customSensor.customADData.resize(8);
+              customSensor.header.stamp = ros::Time::now();
+              customSensor.header.frame_id = string("drrobot_customsensor");
 
-              drrobot_player_driver3::IMUData imuData;
-              imuData.header.stamp = ros::Time::now();
-              imuData.header.frame_id = string("drrobot_imu_");
-              imuData.header.frame_id += boost::lexical_cast<std::string>(cntNum_);
-
-              imuData.seq = imuSensorData_.seq;
-              imuData.yaw = imuSensorData_.yaw;
-              imuData.pitch = imuSensorData_.pitch;
-              imuData.roll = imuSensorData_.roll;
-
-              imuData.gyro_x = imuSensorData_.gyro_x;
-              imuData.gyro_y = imuSensorData_.gyro_y;
-              imuData.gyro_z = imuSensorData_.gyro_z;
-
-              imuData.accel_x = imuSensorData_.accel_x;
-              imuData.accel_y = imuSensorData_.accel_y;
-              imuData.accel_z = imuSensorData_.accel_z;
-
-              imuData.comp_x = imuSensorData_.comp_x;
-              imuData.comp_y = imuSensorData_.comp_y;
-              imuData.comp_z = imuSensorData_.comp_z;
-
-	  //    ROS_INFO("SeqNum [%d]",  imuData.seq );
-          //    ROS_INFO("publish IMU sensor data");
-              imu_pub_.publish(imuData);
-
-              drrobot_player_driver3::GPSInfo gpsInfo;
-              gpsInfo.header.stamp = ros::Time::now();
-              gpsInfo.header.frame_id = string("drrobot_gps_");
-              gpsInfo.header.frame_id += boost::lexical_cast<std::string>(cntNum_);
-
-	      gpsInfo.time = gpsSensorData_.timeStamp;
-	      gpsInfo.date = gpsSensorData_.dateStamp;
-              gpsInfo.status = gpsSensorData_.gpsStatus;
-              gpsInfo.latitude = gpsSensorData_.latitude;
-              gpsInfo.longitude = gpsSensorData_.longitude;
-              gpsInfo.vog = gpsSensorData_.vog;
-              gpsInfo.cog = gpsSensorData_.cog;
-
-            //  ROS_INFO("publish GPS Info");
-              gps_pub_.publish(gpsInfo);
-	       
-		//send ping command here
-              drrobotMotionDriver_->sendCommand("PING",4);
-
+              for (uint32_t i = 0; i < 8; i ++)
+              {
+                customSensor.customADData[i] = customSensorData_.customADData[i];
+              }
+              customSensor.customIO = (uint8_t)(customSensorData_.customIO & 0xff);
+              customSensor_pub_.publish(customSensor);
+      }
     }
-
 
 private:
 
     DrRobotMotionSensorDriver* drrobotMotionDriver_;
-
+    DrRobotMotionSensorDriver* drrobotPowerDriver_;
     struct DrRobotMotionConfig robotConfig1_;
+    struct DrRobotMotionConfig robotConfig2_;
 
     std::string odom_frame_id_;
     struct MotorSensorData motorSensorData_;
-    struct MotorBoardData motorBoardData_;
-    struct IMUSensorData imuSensorData_;
-    struct GPSSensorData gpsSensorData_;
+    struct RangeSensorData rangeSensorData_;
+    struct PowerSensorData powerSensorData_;
+    struct StandardSensorData standardSensorData_;
+    struct CustomSensorData customSensorData_;
+
 
     std::string robotType_;
     std::string robotID_;
     std::string robotIP_;
     std::string robotCommMethod_;
     std::string robotSerialPort_;
+    bool enable_ir_;
+    bool enable_sonar_;
     int  commPortNum_;
     int  encoderOneCircleCnt_;
     double wheelDis_;
@@ -380,14 +507,35 @@ private:
     double maxSpeed_;
 
     int cntNum_;
+    double ad2Dis(int adValue)
+    {
+      double temp = 0;
+      double irad2Dis = 0;
 
+      if (adValue <= 0)
+        temp = -1;
+      else
+        temp = 21.6 /((double)adValue * 3 /4096 - 0.17);
+
+      if ( (temp > 80) || (temp < 0))
+      {
+        irad2Dis = 0.81;
+      }
+      else if( (temp < 10) && (temp > 0))
+      {
+        irad2Dis = 0.09;
+      }
+      else
+        irad2Dis = temp /100;
+      return irad2Dis;
+    }
 };
 
 
 
 int main(int argc, char** argv)
 {
-    ros::init(argc, argv, "drrobot_player_driver3_node");
+    ros::init(argc, argv, "drrobot_player_driver3");
 
     DrRobotPlayerNode drrobotPlayer;
     ros::NodeHandle n;
@@ -398,12 +546,11 @@ int main(int argc, char** argv)
     }
     /////////////////////////////////////////////////////////////////
 
-    ros::Rate loop_rate(50);      //10Hz
+    ros::Rate loop_rate(10);      //10Hz
 
     while (n.ok())
     {
       drrobotPlayer.doUpdate();
-      
       ros::spinOnce();
      loop_rate.sleep();
     }
