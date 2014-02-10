@@ -1,0 +1,3 @@
+drrobot__player_driver3: {RobotCommMethod: Network, RobotID: DrRobot, RobotBaseIP: 192.168.0.60,
+  RobotPortNum: 10001, RobotSerialPort: /dev/ttyS0, RobotType: Jaguar, MotorDir: 1, WheelRadius: 0.135, WheelDistance: 0.45,
+  EncoderCircleCnt: 380, MinSpeed: 0.1, MaxSpeed: 1.0, Enable_IR: false, Enable_US: false}
