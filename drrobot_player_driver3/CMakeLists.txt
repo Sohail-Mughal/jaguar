@@ -19,8 +19,6 @@ add_message_files(
    FILES
    MotorInfo.msg
    MotorInfoArray.msg
-   RangeArray.msg
-   Range.msg
    PowerInfo.msg
    StandardSensor.msg
    CustomSensor.msg
