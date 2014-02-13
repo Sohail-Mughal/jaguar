@@ -17,12 +17,13 @@ find_package(Boost REQUIRED COMPONENTS system)
 ## Generate messages in the 'msg' folder
 add_message_files(
    FILES
-   GPSInfo.msg
-   IMUData.msg
-   MotorBoardInfo.msg
-   MotorBoardInfoArray.msg
-   MotorData.msg
-   MotorDataArray.msg
+   MotorInfo.msg
+   MotorInfoArray.msg
+   RangeArray.msg
+   Range.msg
+   PowerInfo.msg
+   StandardSensor.msg
+   CustomSensor.msg
 )
 
 ## Generate added messages and services with any dependencies listed here

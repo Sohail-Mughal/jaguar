@@ -1,9 +1,10 @@
 /*! @mainpage
  *  DrRobotMotionSensorDriver
- *  Copyright (C) 2013-2014  Dr Robot Inc
+ *  Copyright (C) 2010-2011  Dr Robot Inc
  *
  *  This library is software driver for motion/power control system
- *  on Jaguar/Puma outdoor robot from Dr Robot Inc.
+ *  on I90 series robot, Sentinel3 robot, Hawk/H20, X80SV
+ *  series robot and Jaguar outdoor robot from Dr Robot Inc.
  *  This library is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU Lesser General Public
  *  License as published by the Free Software Foundation; either
@@ -20,8 +21,8 @@
  *
  * DrRobotMotionSensorDriver.hpp
  *
- *  Created on: July, 2013
- *      Author: Dr Robot
+ *  Created on: Mar 11, 2011
+ *      Author: dri
  */
 
 #ifndef DRROBOTMOTIONSENSORDRIVER_H_
@@ -50,23 +51,11 @@
 #include <boost/shared_ptr.hpp>
 #include <poll.h>
 
-#define COMM_LOST_TH	200
-#define KNNOT2MS   	0.5144444
-#define FULLAD    	4095
+
 //! A namespace containing the DrRobot Motion/Sensor driver
 namespace DrRobot_MotionSensorDriver
 {
   typedef unsigned char BYTE;
-
-  /*! This definition limits the motor number
-  */
-  const int MOTORSENSOR_NUM = 8;
-
-
-  /*! This definition limits the motor driver board number
-  */
-    const int MOTORBOARD_NUM = 4;
-
 
  /*! This definition limits all the string variables length < 255
   * such as robotID, robotIP and serial port name
@@ -75,11 +64,22 @@ namespace DrRobot_MotionSensorDriver
 
   /*! This definition limits the communication receiving buffer length
    */
-  const int MAXBUFLEN = 1024;
+  const int MAXBUFLEN = 512;
 
   /*! This definition is no control command for motion control system.
    *
    */
+  const int  NOCONTROL = -32768;
+
+  const int ULTRASONICSENSOR_NUM = 6;	//!< on motion control system up to 6 channel ultrasonic sensor,
+					//!< I90, Sentinel3 [0,1,2], Hawk [0~5], H20[0~4], X80SV, X80SVP [0~5]
+  const int CUSTOMSENSOR_NUM = 8;	//!< on motion control system up to 8 AD channel
+					//!< not available on standard I90,Sentinel3, Hawk/H20 robot
+  const int MOTORSENSOR_NUM = 6;	//!< on motion control system up to 6 motor channel
+					//!< channel 0,1 for I90,Sentinel3,Hawk/H20 left/right motor
+					//!< channel 0,1 for Jaguar Arm motor, channel 3,4 for Jaguar forward/Turn power,
+  const int IRRANGESENSOR_NUM = 10;	//!< up to 10 IR range sensor on standard I90/Sentinel3/Hawk/H20 Robot
+					//!< mounting position/orientation information please referee robot manual
 
   /*! \enum CommMethod
    * Normally for standard robot, driver will use Network to communicate with robot
@@ -90,15 +90,14 @@ namespace DrRobot_MotionSensorDriver
    *  Driver communication status
    */
   enum CommState { Disconnected, Connected};
-
-  /*! \enum robot type
-   *  specify the robot system on the robot
+  /*! \enum CommMethod
+   *  specify the control system on the robot
    */
-  enum RobotType {Jaguar,Puma};
+  enum BoardType {I90_Motion,I90_Power,Sentinel3_Motion, Sentinel3_Power,Hawk_H20_Motion,Hawk_H20_Power,Jaguar,X80SV};
   /*! \enum CtrlMethod
    *  specify control method of the motor control command
    */
-  enum CtrlMethod {OpenLoop,Velocity,Position};
+  enum CtrlMethod {PWM,Velocity,Position};
 
   /*! \struct  DrRobotMotionConfig
    *  to configure the driver
@@ -110,7 +109,7 @@ namespace DrRobot_MotionSensorDriver
     int portNum;                       //!< robot main WiFi module port number, default is power system on 10001 port, motion system on 10002
     CommMethod commMethod;             //!< communication method enum CommMethod
     char serialPortName[CHAR_BUF_LEN]; //!< serial port name if you use serial communication
-    RobotType robotType;               //!< specify the control system on the robot, enum BoardType
+    BoardType boardType;               //!< specify the control system on the robot, enum BoardType
   };
 
   /*! \struct  MotorSensorData
@@ -120,72 +119,87 @@ namespace DrRobot_MotionSensorDriver
   {
     int motorSensorEncoderPos[MOTORSENSOR_NUM];         //!< encoder count reading
     int motorSensorEncoderVel[MOTORSENSOR_NUM];         //!< encoder velocity reading
-    int motorSensorCurrent[MOTORSENSOR_NUM];            //!< motor current AD value reading,
-    int motorSensorTemperature[MOTORSENSOR_NUM];        //!< motor temperature sensor reading
-    int motorSensorPWM[MOTORSENSOR_NUM];                //!< motor driver board output PWM value,
-    int motorSensorEncoderPosDiff[MOTORSENSOR_NUM];     //!< encoder count reading difference related with last reading
+    int motorSensorEncoderDir[MOTORSENSOR_NUM];         //!< encoder move direction reading
+    int motorSensorCurrent[MOTORSENSOR_NUM];            //!< motor current AD value reading, only channel 0,1 available on I90/Sentinel3/H20/Hawk robot
+    int motorSensorPot[MOTORSENSOR_NUM];                //!< motor potentiometer sensor reading, not available now
+    int motorSensorPWM[MOTORSENSOR_NUM];                //!< motion control system output PWM value, only channel[0,1,3,4] available on Jaguar robot
   };
 
-
-  /*! \struct  MotorDriverBoardData
-   *  for motor driver board information
+  /*! \struct  PowerSensorData
+   *  only available on I90/Sentinel3/Hawk/H20 power control system
    */
-  struct MotorBoardData
+  struct PowerSensorData
   {
-    int status[MOTORBOARD_NUM];                         //!< motor board status, read back from query "FF"
-    int temp1[MOTORBOARD_NUM];                           //!< motor board internal temperature 1
-    int temp2[MOTORBOARD_NUM];                           //!< motor board internal temperature 2
-    int temp3[MOTORBOARD_NUM];                           //!< motor board internal temperature 3
-
-    double volMain[MOTORBOARD_NUM];                     //!< motor board main power voltage, default is battery voltage
-    double vol12V[MOTORBOARD_NUM];                      //!< motor board 12V power voltage
-    double vol5V[MOTORBOARD_NUM];                       //!< motor board 5V power voltage
-
-    int dinput[MOTORBOARD_NUM];                             //!< digital input, not used now
-    int doutput[MOTORBOARD_NUM];                             //!< digital output, not used now
-    int ack[MOTORBOARD_NUM];                            //!< 0- right command received("+"), -1 wrong command("-")
+    int battery1Vol;            //!< battery 1 voltage AD value reading
+    int battery1Thermo;         //!< battery 1 temperature AD value reading
+    int battery2Vol;            //!< battery 2 voltage AD value reading
+    int battery2Thermo;         //!< battery 2 temperature AD value reading
+    int dcINVol;                //!< DCIN voltage AD value reading
+    int refVol;                 //!< AD reference power AD value reading
+    BYTE powerStatus;           //!< power control system status, please referee the Dr Robot protocol reference manual
+                                //!< bit 0 --- reserved
+                                //!< bit 1 --- reserved
+                                //!< bit 2 --- charge status, '1' in charging, '0' no charging
+                                //!< bit 3 --- power fail
+                                //!< bit 4 --- DCDIV comparator output
+                                //!< bit 5 --- lower power
+                                //!< bit 6 --- Fault(no reset, short circuit, shutdown)
+                                //!< bit 7 --- reserved
+    BYTE powerPath;             //!< power path control, please referee the Dr Robot protocol reference mannaul
+                                //!< bit 0 --- reserved
+                                //!< bit 1 --- reserved
+                                //!< bit 2 --- reserved
+                                //!< bit 3 --- reserved
+                                //!< bit 4 --- reserved
+                                //!< bit 5 --- '1' powered by DCIN, '0' no
+                                //!< bit 6 --- '1' powered by Battery2, '0' no
+                                //!< bit 7 --- '1' powered by Battery1, '0' no
+    BYTE powerChargePath;       //!< charge path control, please referee the Dr Robot protocol reference mannual
+                                //!< bit 0 --- reserved
+                                //!< bit 1 --- reserved
+                                //!< bit 2 --- reserved
+                                //!< bit 3 --- reserved
+                                //!< bit 4 --- reserved
+                                //!< bit 5 --- reserved
+                                //!< bit 6 --- '1' Battery2 in charging, '0' no
+                                //!< bit 7 --- '1' Battery1 in charging, '0' no
   };
 
-  /*! \struct  GPSInfoData
-   *   this structure will decoded $GPRSMC message from GPS
+  /*! \struct  RangeSensorData
+   *  the driver will collector all the IR range sensors(AD value) and ultrasonic sensors reading
+   *  into this structure, user could use on reading function to get all the range sensor information
    */
-  struct GPSSensorData
+  struct RangeSensorData
   {
-    long timeStamp;             //!< GPS Message time stamp, format: hhmmss
-    long dateStamp;             //!< GPS date stamp, format:ddmmyy
-
-    int gpsStatus;              //!< GPS status, 0-fixed,1-differential, -1 -- invalid
-    double latitude;            //!< GPS latitude, - ==south, + == north
-    double longitude;           //!< GPS longitude, - ==west, + == east
-    double vog;                 //!< GPS velocity over ground   m/s
-    double cog;                 //!< GPS course over ground,,radian
+    int irRangeSensor[IRRANGESENSOR_NUM];       //!< IR range sensor AD value reading
+    int usRangeSensor[ULTRASONICSENSOR_NUM];    //!< ultrasonic range sensor reading, unit is cm, 0~ 255cm
   };
-
-  /*! \struct  IMUSensorData
-   *   this structure will decoded IMU data
+  /*! \struct  CustomSensorData
+   *  8 expanded AD channel not available on standard robot
+   *  8bit expanded IO channel available
    */
-  struct IMUSensorData
+  struct CustomSensorData
   {
-    int seq;                    //!< IMU sensor package sequence number, 0~ 255
-    double yaw;                 //!< yaw estimate from robot, unit:radian
-    double pitch;               //!< pitch estimate from robot, unit:radian, not used now
-    double roll;                //!< roll estimate from robot, unit:radian, not used now
-
-    int gyro_x;                 //!< raw gyro x axis data
-    int gyro_y;                 //!< raw gyro y axis data
-    int gyro_z;                 //!< raw gyro z axis data
-
-    int accel_x;                 //!< raw accel x axis data
-    int accel_y;                 //!< raw accel y axis data
-    int accel_z;                 //!< raw accel z axis data
-
-    int comp_x;                 //!< raw magnetic sensor x axis data
-    int comp_y;                 //!< raw magnetic sensor y axis data
-    int comp_z;                 //!< raw magnetic sensor z axis data
-
+    int customADData[CUSTOMSENSOR_NUM];         //!< expanded AD channel not available
+    int customIO;                               //!< expanded IO channel, the lower 8bit to 8 input channel
   };
-
-
+  /*! \struct  StandardSensorData
+   *  Here are the sensor reading which could be connected with motion control system.
+   *
+   */
+  struct StandardSensorData
+  {
+    int humanSensorData[4];             //!< 2 human sensor, each with alarm/motion 2 channel output, on standard robot,
+                                        //!< left human sensor channel[0,1], right human sensor channel[2,3]
+    int tiltingSensorData[2];           //!< only available on X80SVP robot, channel[0] - X axis, channel[1] -- Y axis
+    int overHeatSensorData[2];          //!< temperature sensor on motion control board
+    int thermoSensorData;               //!< temperature sensor only available on X80SVP robot
+    int boardPowerVol;                  //!< motion control board main power voltage AD reading
+    int motorPowerVol;                  //!< motor power voltage AD reading
+    int servoPowerVol;                  //!< servo power voltage AD reading, only available on X80 series robot
+    int refVol;                         //!< motion control board AD reference power voltage reading, should be around 2048
+    int potVol;                         //!< potentiometer power voltage reading, should be around 2048, not used now
+  };
 
 /*! \class DrRobotMotionSensorDriver
  *      This is the main class declare
@@ -262,7 +276,7 @@ namespace DrRobot_MotionSensorDriver
 
     /*! @brief
      *  This function is used for reading motor sensor back from motion controller
-     * @param[in]   motorSensorData this struct MotorSensorData will contain all the latest motor sensor data when return
+     * @param[in]   motorSensorData this struct MotorSensorData will contain all the raw motor sensor data when return
      * @return 0 means success, other fail
      */
 
@@ -270,38 +284,239 @@ namespace DrRobot_MotionSensorDriver
     int readMotorSensorData(MotorSensorData* motorSensorData );
 
     /*! @brief
-     *  This function is used for reading IMU sensor back from robot
-
-     * @param[in]   imuSensorData this struct IMUSensorData will contain all the latest IMU sensor data when returning
+     *  This function is used for reading power sensor back from power control system
+     *  It is only for I90 series/Sentinel3/Hawk/H20 system
+     * @param[in]   powerSensorData this struct PowerSensorData will contain all the raw power sensor data when returning
      * @return 0 means success, other fail
      */
-    int readIMUSensorData(IMUSensorData* imuSensorData );
+    int readPowerSensorData(PowerSensorData* powerSensorData );
 
     /*! @brief
-     *  This function is used for reading GPS sensor back from robot
-     * @param[in]   gpsSensorData this struct GPSSensorData will contain all the latest GPS sensor data when returning
+     *  This function is used for reading custom sensor back from motion controller
+     *  On standard I90/Sentinel3/Hawk/H20 Robot, custom expanded AD channel not available
+     * @param[in]   customSensorData this struct CustomSensorData will contain all the raw custom sensor data when returning
      * @return 0 means success, other fail
      */
-    int readGPSSensorData(GPSSensorData* gpsSensorData);
+    int readCustomSensorData(CustomSensorData* customSensorData);
 
     /*! @brief
-     *  This function is used for reading all the motor board information back from robot
-     * @param[in]   motorBoardData this struct MotorBoardData will contain all the latest motor board info data when returning
+     *  This function is used for reading all the range sensor back from motion controller
+     *  It will include 6 ultrasonic sensors and 10 IR range sensor raw data.
+     *  What is available on robot and mounting information please referee the robot manual
+     * @param[in]   rangeSensorData this struct RangeSensorData will contain all the raw range sensor data when returning
      * @return 0 means success, other fail
      */
-    int readMotorBoardData(MotorBoardData* motorBoardData);
+    int readRangeSensorData(RangeSensorData* rangeSensorData);
 
     /*! @brief
-     *  This function is used for sending all the command to robot
-     * @param[in]   command message and length of message, please not it must be ended with \r\n
+     *  This function is used for reading standard sensor back from motion controller
+     * @param[in]   standardSensorData this struct StandardSensorData will contain all the raw standard sensor data when returning
      * @return 0 means success, other fail
      */
+    int readStandardSensorData(StandardSensorData* standardSensorData);
 
-    int sendCommand(const char* msg, const int nLen);
+
+    /*! @brief
+     *  This function is used for sending 6 channel motors time control command to motion controller
+     *  The first input parameter will tell controller what control method will be used for these command.
+     *  PWM command value is in range (0 ~ 32767), 16384 will stop robot.
+     *  Velocity/Position command value is for encoder value.
+     *  If the value is -32768, it means this channel will not be controlled by this command.
+     * @param[in]   ctrlMethod enum CtrlMethod{PWM,Velocity,Position}
+     * @param[in]   cmd1 motor channel 0 command value
+     * @param[in]   cmd2 motor channel 1 command value
+     * @param[in]   cmd3 motor channel 2 command value
+     * @param[in]   cmd4 motor channel 3 command value
+     * @param[in]   cmd5 motor channel 4 command value
+     * @param[in]   cmd6 motor channel 5 command value
+     * @param[in]   time execute time, unit is ms, it must > 0, otherwise in function it will be forced as "1"
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int sendMotorCtrlAllCmd(CtrlMethod ctrlMethod, const int cmd1, const int cmd2, const int cmd3, const int cmd4, const int cmd5, const int cmd6, const int time);
+
+    /*! @brief
+     *  This function is used for sending 6 channel motors control command to motion controller
+     *  The first input parameter will tell controller what control method will use for these command.
+     *  PWM command value is in range (0 ~ 32767), 16384 will stop robot.
+     *  Velocity/Position command value is for encoder value.
+     *  If the value is -32768, it means this channel will not be controlled by this command.
+     * @param[in]   ctrlMethod enum CtrlMethod{PWM,Velocity,Position}
+     * @param[in]   cmd1 motor channel 0 command value
+     * @param[in]   cmd2 motor channel 1 command value
+     * @param[in]   cmd3 motor channel 2 command value
+     * @param[in]   cmd4 motor channel 3 command value
+     * @param[in]   cmd5 motor channel 4 command value
+     * @param[in]   cmd6 motor channel 5 command value
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int sendMotorCtrlAllCmd(CtrlMethod ctrlMethod, const int cmd1, const int cmd2, const int cmd3, const int cmd4, const int cmd5, const int cmd6);
+
+    /*! @brief
+     *  This function is used for sending one channel motor time control command to motion controller
+     *  The first input parameter will tell controller what control method will be used for the command.
+     *  PWM command value is in range (0 ~ 32767), 16384 will stop robot.
+     *  Velocity/Position command value is for encoder value.
+     *  If the value is -32768, it means this channel will not be controlled by this command.
+     * @param[in]   ctrlMethod enum CtrlMethod{PWM,Velocity,Position}
+     * @param[in]   channel specify the motor channel, 0 ~ 5
+     * @param[in]   cmd motor command value
+     * @param[in]   time execute time, unit is ms, it must > 0, otherwise in function it will be forced as "1"
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int sendMotorCtrlCmd(CtrlMethod ctrlMethod, const int channel, const int cmd, const int time);
+
+    /*! @brief
+     *  This function is used for sending one channel motor control command to motion controller
+     *  The first input parameter will tell controller what control method will be used for the command.
+     *  PWM command value is in range (0 ~ 32767), 16384 will stop robot.
+     *  Velocity/Position command value is for encoder value.
+     *  If the value is -32768, it means this channel will not be controlled by this command.
+     * @param[in]   ctrlMethod enum CtrlMethod{PWM,Velocity,Position}
+     * @param[in]   channel specify the motor channel, 0 ~ 5
+     * @param[in]   cmd motor command value
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int sendMotorCtrlCmd(CtrlMethod ctrlMethod, const int channel, const int cmd);
+
+    /*! @brief
+     *  This function is used for sending 6 channel servo time control command to motion controller
+     *  command value should be in the servo command range to prevent the servo from stuck
+     *  If the value is -32768, it means this channel will not be controlled by this command.
+     * @param[in]   cmd1 servo channel 0 command value
+     * @param[in]   cmd2 servo channel 1 command value
+     * @param[in]   cmd3 servo channel 2 command value
+     * @param[in]   cmd4 servo channel 3 command value
+     * @param[in]   cmd5 servo channel 4 command value
+     * @param[in]   cmd6 servo channel 5 command value
+     * @param[in]   time execute time, unit is ms, it must > 0, otherwise in function it will be forced as "1"
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int sendServoCtrlAllCmd(const int cmd1, const int cmd2, const int cmd3, const int cmd4, const int cmd5, const int cmd6, const int time);
+
+    /*! @brief
+     *  This function is used for sending 6 channel servo control command to motion controller
+     *  command value should be in the servo command range to prevent the servo from stuck
+     *  If the value is -32768, it means this channel will not be controlled by this command.
+     * @param[in]   cmd1 servo channel 0 command value
+     * @param[in]   cmd2 servo channel 1 command value
+     * @param[in]   cmd3 servo channel 2 command value
+     * @param[in]   cmd4 servo channel 3 command value
+     * @param[in]   cmd5 servo channel 4 command value
+     * @param[in]   cmd6 servo channel 5 command value
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int sendServoCtrlAllCmd(const int cmd1, const int cmd2, const int cmd3, const int cmd4, const int cmd5, const int cmd6);
+
+    /*! @brief
+     *  This function is used for sending one channel servo time control command to motion controller
+     *  command value should be in the servo command range to prevent the servo from stuck
+     *  If the value is -32768, it means this channel will not be controlled by this command.
+     * @param[in]   channel servo channel, 0 ~ 5
+     * @param[in]   cmd servo command value
+     * @param[in]   time execute time, unit is ms, it must > 0, otherwise in function it will be forced as "1"
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int sendServoCtrlCmd(const int channel, const int cmd, const int time);
+
+    /*! @brief
+     *  This function is used for sending one channel servo control command to motion controller
+     *  command value should be in the servo command range to prevent the servo from stuck
+     *  If the value is -32768, it means this channel will not be controlled by this command.
+     * @param[in]   channel servo channel 0 ~ 5
+     * @param[in]   cmd servo command value
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int sendServoCtrlCmd(const int channel, const int cmd);
+
+    /*! @brief
+     *  This function is used for disable one channel motor command to motion controller
+     * @param[in]   channel motor channel
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int disableMotorCmd(const int channel);
+
+    /*! @brief
+     *  This function is used for disable one channel servo command to motion controller
+     * @param[in]   channel servo channel, 0 ~ 5
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int disableServoCmd(const int channel);
+
+    /*! @brief
+     *  This function is used for sending one channel motor setting position PID control parameter command to motion controller
+     * @param[in]   channel motor channel
+     * @param[in]   kp PID control Kp value
+     * @param[in]   kd PID control Kd value
+     * @param[in]   ki PID control Ki value, this value will be divided by 10 in the firmware
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int setMotorPositionCtrlPID(const int channel, const int kp, const int kd, const int ki);
+
+    /*! @brief
+     *  This function is used for sending one channel motor setting velocity PID control parameter command to motion controller
+     * @param[in]   channel motor channel
+     * @param[in]   kp PID control Kp value
+     * @param[in]   kd PID control Kd value
+     * @param[in]   ki PID control Ki value, this value will be divided by 10 in the firmware
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int setMotorVelocityCtrlPID(const int channel, const int kp, const int kd, const int ki);
+
+    /*! @brief
+     *  This function is used for sending friction compensation value for all 6 motors to motion controller.
+     *  Normaly you don't need to change these value in the firmware.
+     * @param[in]   cmd1 motor channel 0 friction compensation value
+     * @param[in]   cmd2 motor channel 1 friction compensation value
+     * @param[in]   cmd3 motor channel 2 friction compensation value
+     * @param[in]   cmd4 motor channel 3 friction compensation value
+     * @param[in]   cmd5 motor channel 4 friction compensation value
+     * @param[in]   cmd6 motor channel 5 friction compensation value
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int setMotorFricCompensation(const int cmd1, const int cmd2, const int cmd3, const int cmd4, const int cmd5, const int cmd6);
+
+    /*! @brief
+     *  This function is used for sending setting expanded IO command to motion controller
+     * @param[in]   cmd setting IO command, one bit for one channel
+     * @return If return value is negative, it means there is something wrong with sending command to robot.
+     *        If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int setCustomIO(const int cmd);
+
+    /*! @brief
+     *  This function is used for sending power control command to power control system.
+     *  This command only available for I90/Sentinel3/Hawk/H20 robot.
+     *  You could referee the robot manual to get what system on each power channel
+     * @param[in]   cmd setting power control system
+     *              bit 0 --- '1' turn on the channel 1, '0' turn off the channel 1
+     *              bit 1 --- '1' turn on the channel 2, '0' turn off the channel 2
+     *              bit 2 --- '1' turn on the channel 3, '0' turn off the channel 3
+     *              bit 3 --- choose DCIN as power source
+     *              bit 4 --- choose Battery 2 as power source
+     *              bit 5 --- choose Battery 1 as power source
+     *              bit 6 --- '1' start charging Battery2, '0' stop charging Battery2
+     *              bit 7 --  '1' start charging Battery1, '0' stop charging Battery1
+     * @return  If return value is negative, it means there is something wrong with sending command to robot.
+     *          If successfully sending command, it will return the byte numbers of sending message.
+     */
+    int sendPowerCtrlCmd(const int cmd);
 
   private:
-    char _recBuf[MAXBUFLEN];
-    char _dataBuf[MAXBUFLEN];
+    BYTE _recBuf[MAXBUFLEN];
+    BYTE _dataBuf[MAXBUFLEN];
     int _nMsgLen;
     int _sockfd;
     int _serialfd;
@@ -319,27 +534,22 @@ namespace DrRobot_MotionSensorDriver
     void debug_ouput(const char* errorstr);
     int vali_ip(const char* ip_str);
     int sendAck();
+    unsigned char CalculateCRC( const unsigned char *lpBuffer, const int nSize);
     void commWorkingThread();
-    void DealWithPacket(const char *lpComData, const int nLen);
-    void handleComData(const char *data, const int nLen);
-    void processIMUMessage(char * pData, const int nLen);
-    void processGPSMessage(char * pData, const int nLen);
-    void processMotorMessage(char * pData, const int nLen);
-    double trans2Degree(double angle);
-    double trans2Temperature(double adValue);
+    void DealWithPacket(const unsigned char *lpComData, const int nLen);
+    void handleComData(const unsigned char *data, const int nLen);
     bool _stopComm;
     CommState _eCommState;
     void debugCommMessage(std::string msg);
-
+    int sendCommand(const unsigned char* msg, const int nLen);
     //sensor data here
-    struct GPSSensorData  _gpsSensorData;
-    struct IMUSensorData _imuSensorData;
+    struct RangeSensorData  _rangeSensorData;
+    struct CustomSensorData _customSensorData;
     struct MotorSensorData _motorSensorData;
-    struct MotorBoardData _motorBoardData;
-    int longhem;
-    int lathem;
-    static double resTable[25];
-    static double tempTable[25];
+    struct PowerSensorData _powerSensorData;
+    struct StandardSensorData _standardSensorData;
+    unsigned char _desID;
+    unsigned char _pcID;
   };
 
 }
