@@ -31,7 +31,7 @@ DrRobot_MotionSensorDriver::DrRobotMotionSensorDriver::DrRobotMotionSensorDriver
   sprintf(_robotConfig->robotID, "DrRobot");
   sprintf(_robotConfig->robotIP, "192.168.0.201");
 
-  _robotConfig->boardType = I90_Power;
+  _robotConfig->boardType = Jaguar;
 
   _nMsgLen = 0;
 
