@@ -483,6 +483,8 @@ public:
               ROS_INFO("delta_encoder_left: [%ld]", delta_encoder_left);
               ROS_INFO("delta_encoder_right: [%ld]", delta_encoder_right);*/
 
+              /*
+              //old ODOM code
               right_cm = delta_encoder_right/TICKS_PER_CM;
               left_cm = delta_encoder_left/TICKS_PER_CM;
 
@@ -530,7 +532,7 @@ public:
               odom.twist.twist.linear.y = 0.0;
               odom.twist.twist.angular.z = 0.0;
 
-              odom_pub.publish(odom);
+              odom_pub.publish(odom);*/
 
 
               drrobot_player_driver3::RangeArray rangerArray;
