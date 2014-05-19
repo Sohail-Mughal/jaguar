@@ -257,6 +257,7 @@ void DrRobot_MotionSensorDriver::DrRobotMotionSensorDriver::commWorkingThread(){
         {
           printf("Communication is lost, need close all. IP address %s, Port: %d \n", _robotConfig->robotIP, _robotConfig->portNum);
           _stopComm = true;
+          openNetwork(_robotConfig->robotIP, _robotConfig->portNum);
           return;
         }
       }
