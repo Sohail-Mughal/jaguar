@@ -1,0 +1,43 @@
+<launch>
+  <node name="drrobot_player_driver3" pkg="drrobot_player_driver3" type="drrobot_player_driver3_node" />
+  <node name="jaguar_teleop" pkg="jaguar_teleop" type="jaguar_teleop_node" />
+  <node name="joy" pkg="joy" type="joy_node" />
+  <node pkg="tf" type="static_transform_publisher" name="link1_broadcaster" args="0.20 0.0 0.40 0.0 0.0 0.0 base_link base_laser 100" />
+  <!--<node pkg="tf" type="static_transform_publisher" name="link2_broadcaster" args="0 0 0 0 0 0 laser base_laser 100" />-->
+  <!--<node pkg="tf" type="static_transform_publisher" name="link2_broadcaster" args="1 0 0 0 0 0 base_footprint base_link 100" />-->
+  <!--<node pkg="tf" type="static_transform_publisher" name="link3_broadcaster" args="1 0 0 0 0 0 odom base_footprint 100" />-->
+  
+
+<node pkg="hector_mapping" type="hector_mapping" name="hector_mapping" output="screen">
+
+    <param name="pub_map_odom_transform" value="true"/>
+    <param name="map_frame" value="map" />
+    <param name="scan_topic" value="scan" />
+    <param name="base_frame" value="base_link" />
+    <param name="odom_frame" value="odom" />
+
+    <param name="use_tf_scan_transformation" value="true"/>
+    <param name="use_tf_pose_start_estimate" value="false"/>
+    <param name="pub_map_odom_transform" value="true"/>
+    
+    <!-- Map size / start point -->
+    <param name="map_resolution" value="0.050"/>
+    <param name="map_size" value="4096"/>
+    <param name="map_start_x" value="0.5"/>
+    <param name="map_start_y" value="0.5" />
+    <param name="map_multi_res_levels" value="2" />
+    
+    <!-- Map update parameters -->
+    <param name="update_factor_free" value="0.4"/>
+    <param name="update_factor_occupied" value="0.9" />    
+    <param name="map_update_distance_thresh" value="0.4"/>
+    <param name="map_update_angle_thresh" value="0.06" />
+    <param name="laser_z_min_value" value = "-1.0" />
+    <param name="laser_z_max_value" value = "1.0" />
+    
+    <!-- Advertising config --> 
+    <param name="advertise_map_service" value="true"/>
+
+
+  </node>
+</launch>
