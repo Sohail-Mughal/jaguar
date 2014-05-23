@@ -37,7 +37,7 @@ add_message_files(
 ###################################
 
 catkin_package(
-   INCLUDE_DIRS include
+#   INCLUDE_DIRS include
 #  LIBRARIES drrobot_player_driver3
   CATKIN_DEPENDS roscpp rospy tf std_msgs nav_msgs geometry_msgs message_runtime
   DEPENDS Boost
