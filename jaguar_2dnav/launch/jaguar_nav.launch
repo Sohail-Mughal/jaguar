@@ -18,6 +18,7 @@
 
 <!-- MI controller -->
 <node pkg="mixed_initiative_controller" type="mixed_initiative_controller_node" name="mi_controller" output="screen">
+<remap from="/cmd_vel" to="drrobot_cmd_vel" />
 </node>
 
   <!-- SICK laser scaner drivers -->
@@ -33,28 +34,30 @@
   <!-- args ="x y z qx qy qz frame_id child_frame_id period_in_ms" -->
   <node pkg="tf" type="static_transform_publisher" name="base_link_to_laser" args="0.224 0 0.125 0 0 0 base_link base_laser 20" />
 
+<!--node pkg="tf" type="static_transform_publisher" name="map_to_base_link" args="0.224 0 0.125 0 0 0 map base_link 20" /-->
+
 <!-- Hector SLAM -->
-  <include file="$(find dora_2dnav)/launch/hector_slam.launch"/>
+  <include file="$(find jaguar_2dnav)/launch/hector_slam.launch"/>
 
 <!-- Hector trajectory server for keeping history and visualizing of all the paths visited -->
-<node pkg="hector_trajectory_server" type="hector_trajectory_server" name="trajectory_server" output="screen">
-  </node>
+<!--node pkg="hector_trajectory_server" type="hector_trajectory_server" name="trajectory_server" output="screen">
+  </node-->
 
-<node pkg="odom_from_pose" type="odom_from_pose_node" name="odom_from_pose" output="screen"> 
-  <!--remap from="/odom_testing" to="/odom" /-->
-  </node>
+<!--node pkg="odom_from_pose" type="odom_from_pose_node" name="odom_from_pose" output="screen"> 
+  <remap from="/odom_testing" to="/odom" />
+  </node-->
 
 <!-- launch move_base -->
-<node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+<!--node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
     <rosparam file="$(find jaguar_2dnav)/config/costmap_common_params.yaml" command="load" ns="global_costmap" />
     <rosparam file="$(find jaguar_2dnav)/config/costmap_common_params.yaml" command="load" ns="local_costmap" />
     <rosparam file="$(find jaguar_2dnav)/config/local_costmap_params.yaml" command="load" />
     <rosparam file="$(find jaguar_2dnav)/config/global_costmap_params.yaml" command="load" />
     <rosparam file="$(find jaguar_2dnav)/config/base_local_planner_params.yaml" command="load" />
 <remap from="/cmd_vel" to="/navigation/cmd_vel" />
-  </node>
+  </node-->
 
 <!-- Frontier exploration -->
-  <include file="$(find dora_2dnav)/config/frontier_exploration.launch"/>
+  <!--include file="$(find dora_2dnav)/config/frontier_exploration.launch"/-->
 
 </launch>
