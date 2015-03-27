@@ -4,7 +4,7 @@ global_costmap:
 
   #Set the frame of ref. for the costmap
   global_frame: /map
-  robot_base_frame: base_link
+  robot_base_frame: /base_link
 
   #Set the update and publish frequency of the costmap
   update_frequency: 10.0
